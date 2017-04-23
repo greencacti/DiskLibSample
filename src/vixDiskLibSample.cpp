@@ -75,6 +75,7 @@ using std::vector;
 #define COMMAND_READASYNCBENCH       (1 << 13)
 #define COMMAND_WRITEASYNCBENCH      (1 << 14)
 #define COMMAND_GET_ALLOCATED_BLOCKS (1 << 15)
+#define COMMAND_REPLACE              (1 << 16)
 
 #define VIXDISKLIB_VERSION_MAJOR 6
 #define VIXDISKLIB_VERSION_MINOR 5
@@ -137,6 +138,7 @@ static struct {
     int repair;
 } appGlobals;
 
+static bool replace(uint8 *buf, int length, string source, string dest);
 static int ParseArguments(int argc, char* argv[]);
 static void DoCreate(void);
 static void DoRedo(void);
@@ -146,6 +148,7 @@ static void DoReadMetadata(void);
 static void DoWriteMetadata(void);
 static void DoDumpMetadata(void);
 static void DoInfo(void);
+static void DoReplace(void);
 static void DoTestMultiThread(void);
 static void DoClone(void);
 static int BitCount(int number);
@@ -1570,6 +1573,8 @@ main(int argc, char* argv[])
 
         if (appGlobals.command & COMMAND_INFO) {
             DoInfo();
+        } else if (appGlobals.command & COMMAND_REPLACE) {
+        	DoReplace();
         } else if (appGlobals.command & COMMAND_CREATE) {
             DoCreate();
         } else if (appGlobals.command & COMMAND_REDO) {
@@ -1653,6 +1658,9 @@ ParseArguments(int argc, char* argv[])
         if (!strcmp(argv[i], "-info")) {
             appGlobals.command |= COMMAND_INFO;
             appGlobals.openFlags |= VIXDISKLIB_FLAG_OPEN_READ_ONLY;
+        } else if (!strcmp(argv[i], "-replace")) {
+        	appGlobals.command |= COMMAND_REPLACE;
+        	appGlobals.openFlags |= VIXDISKLIB_FLAG_OPEN_SINGLE_LINK;
         } else if (!strcmp(argv[i], "-create")) {
             appGlobals.command |= COMMAND_CREATE;
         } else if (!strcmp(argv[i], "-dump")) {
@@ -2070,7 +2078,42 @@ DoCreate(void)
    CHECK_AND_THROW(vixError);
 }
 
+/*
+ *--------------------------------------------------------------------------
+ *
+ * DoReplace --
+ *
+ *      Replace "VMWare" with "Aliyun".
+ *
+ * Results:
+ *      None.
+ *
+ * Side effects:
+ *      None.
+ *
+ *--------------------------------------------------------------------------
+ */
 
+static void
+DoReplace(void)
+{
+    VixDisk disk(appGlobals.connection, appGlobals.diskPaths[0].c_str(), appGlobals.openFlags);
+    uint8 buf[VIXDISKLIB_SECTOR_SIZE * 64];
+    VixDiskLibSectorType i;
+    VixError vixError;
+
+    for(i = 0; i < 2048 / 64; i++) {
+    	vixError = VixDiskLib_Read(disk.Handle(), i * 64, 64, buf);
+    	CHECK_AND_THROW(vixError);
+
+    	bool found = replace(buf, VIXDISKLIB_SECTOR_SIZE * 64, "DadDad", "MumMum");
+    	if(found) {
+        	vixError = VixDiskLib_Write(disk.Handle(), i * 64, 64, buf);
+        	CHECK_AND_THROW(vixError);
+    	}
+    }
+
+}
 /*
  *--------------------------------------------------------------------------
  *
@@ -2832,6 +2875,41 @@ DoCheckRepair(Bool repair)
       throw VixDiskLibErrWrapper(err, __FILE__, __LINE__);
    }
 }
+
+static bool replace(uint8 *buf, int length, string source, string dest) {
+	bool flag = false;
+	bool found = false;
+	int index = 0;
+	int sourceLen = source.length();
+
+	for(int i = 0; i < (length - sourceLen); i++) {
+		if(flag) {
+			if(buf[i] == source[index]) {
+				index++;
+				if(index == sourceLen) {
+					cout << "DadDad is found" << endl;
+					found = true;
+					for(int j = 0; j < sourceLen; j++) {
+						buf[i - sourceLen + 1 + j] = dest[j];
+					}
+					flag = false;
+					index = 0;
+				}
+			} else {
+				flag = false;
+				index = 0;
+			}
+		} else {
+			if(buf[i] == source[index]) {
+				flag = true;
+				index++;
+			}
+		}
+	}
+
+	return found;
+}
+
 #ifdef FOR_MNTAPI
 template <typename Hdl, typename CloseHdl= VixError(*)(Hdl)>
 class HdlWrap
@@ -2941,4 +3019,5 @@ static void DoMntApi(VixDiskLibConnection connection, const char* disk, uint32 o
    } while(isUnmount == 'n');
 
 }
+
 #endif

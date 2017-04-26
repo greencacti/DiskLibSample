@@ -30,6 +30,9 @@
 #include <algorithm>
 #include <list>
 #include <memory>
+#include <sstream>
+#include <fstream>
+#include <vector>
 
 #ifdef _MSC_VER
 #define USE_CXX11 (_MSC_VER > 1700)
@@ -53,6 +56,7 @@
 using std::tr1::shared_ptr;
 #endif
 
+using namespace std;
 using std::cin;
 using std::cout;
 using std::string;
@@ -76,6 +80,8 @@ using std::vector;
 #define COMMAND_WRITEASYNCBENCH      (1 << 14)
 #define COMMAND_GET_ALLOCATED_BLOCKS (1 << 15)
 #define COMMAND_REPLACE              (1 << 16)
+#define COMMAND_RECORDCBT            (1 << 17)
+#define COMMAND_RECOVERCBT           (1 << 18)
 
 #define VIXDISKLIB_VERSION_MAJOR 6
 #define VIXDISKLIB_VERSION_MINOR 5
@@ -138,6 +144,7 @@ static struct {
     int repair;
 } appGlobals;
 
+static vector<string> split(const  std::string& s, const std::string& delim);
 static bool replace(uint8 *buf, int length, string source, string dest);
 static int ParseArguments(int argc, char* argv[]);
 static void DoCreate(void);
@@ -149,6 +156,8 @@ static void DoWriteMetadata(void);
 static void DoDumpMetadata(void);
 static void DoInfo(void);
 static void DoReplace(void);
+static void DoRecordCBT(void);
+static void DoRecoverCBT(void);
 static void DoTestMultiThread(void);
 static void DoClone(void);
 static int BitCount(int number);
@@ -1389,6 +1398,9 @@ PrintUsage(void)
     printf(" -redo parentPath : creates a redo log 'diskPath' "
            "for base disk 'parentPath'\n");
     printf(" -info : displays information for specified virtual disk\n");
+    printf(" -replace : replace the disk content for specified virtual disk\n");
+    printf(" -recordCBT : record CBT for specified virtual disk into a local file\n");
+    printf(" -recoverCBT : recover CBT for specified virtual disk from a local file\n");
     printf(" -dump : dumps the contents of specified range of sectors "
            "in hexadecimal\n");
     printf(" -fill : fills specified range of sectors with byte value "
@@ -1575,6 +1587,10 @@ main(int argc, char* argv[])
             DoInfo();
         } else if (appGlobals.command & COMMAND_REPLACE) {
         	DoReplace();
+        } else if (appGlobals.command & COMMAND_RECORDCBT) {
+        	DoRecordCBT();
+        } else if (appGlobals.command & COMMAND_RECOVERCBT) {
+        	DoRecoverCBT();
         } else if (appGlobals.command & COMMAND_CREATE) {
             DoCreate();
         } else if (appGlobals.command & COMMAND_REDO) {
@@ -1660,6 +1676,12 @@ ParseArguments(int argc, char* argv[])
             appGlobals.openFlags |= VIXDISKLIB_FLAG_OPEN_READ_ONLY;
         } else if (!strcmp(argv[i], "-replace")) {
         	appGlobals.command |= COMMAND_REPLACE;
+        	appGlobals.openFlags |= VIXDISKLIB_FLAG_OPEN_SINGLE_LINK;
+        } else if (!strcmp(argv[i], "-recordCBT")) {
+        	appGlobals.command |= COMMAND_RECORDCBT;
+        	appGlobals.openFlags |= VIXDISKLIB_FLAG_OPEN_READ_ONLY;
+        } else if (!strcmp(argv[i], "-recoverCBT")) {
+        	appGlobals.command |= COMMAND_RECOVERCBT;
         	appGlobals.openFlags |= VIXDISKLIB_FLAG_OPEN_SINGLE_LINK;
         } else if (!strcmp(argv[i], "-create")) {
             appGlobals.command |= COMMAND_CREATE;
@@ -2114,6 +2136,72 @@ DoReplace(void)
     }
 
 }
+
+/*
+ *--------------------------------------------------------------------------
+ *
+ * DoRecordCBT --
+ *
+ *      Record CBT for a specified disk into a local file
+ *
+ * Results:
+ *      None.
+ *
+ * Side effects:
+ *      None.
+ *
+ *--------------------------------------------------------------------------
+ */
+
+static void
+DoRecordCBT(void)
+{
+    VixDisk disk(appGlobals.connection, appGlobals.diskPaths[0].c_str(), appGlobals.openFlags);
+    uint8 *buf;
+    VixError vixError;
+
+    ifstream infile("/root/workspace/backup/changeBlock.txt",ios::in);
+    if(!infile)
+    {
+	    cerr<<"open error!"<<endl;
+        abort( );
+    }
+
+    ofstream outfile("changeBlock.data", ios::binary);
+    if(!outfile)
+    {
+	    cerr<<"open error!"<<endl;
+        abort( );
+    }
+
+    string line = "";
+    while(std::getline(infile, line))
+    {
+        vector<string> extent = split(line, " ");
+        int offset = std::atoi(extent[0].c_str());
+        int length = std::atoi(extent[1].c_str());
+        cout << offset << " " << length << endl;
+
+        buf = new unsigned char[length * VIXDISKLIB_SECTOR_SIZE];
+        int lengthOfBuf = sizeof buf;
+
+        vixError = VixDiskLib_Read(disk.Handle(), offset, length, buf);
+        CHECK_AND_THROW(vixError);
+        outfile.write(reinterpret_cast<const char*>(buf), length * VIXDISKLIB_SECTOR_SIZE);
+
+        delete []buf;
+    }
+
+    outfile.close();
+    infile.close();
+}
+
+static void
+DoRecoverCBT(void)
+{
+
+}
+
 /*
  *--------------------------------------------------------------------------
  *
@@ -2909,6 +2997,28 @@ static bool replace(uint8 *buf, int length, string source, string dest) {
 
 	return found;
 }
+
+static vector<string> split(const  std::string& s, const std::string& delim)
+{
+    std::vector<std::string> elems;
+    size_t pos = 0;
+    size_t len = s.length();
+    size_t delim_len = delim.length();
+    if (delim_len == 0) return elems;
+    while (pos < len)
+    {
+        int find_pos = s.find(delim, pos);
+        if (find_pos < 0)
+        {
+            elems.push_back(s.substr(pos, len - pos));
+            break;
+        }
+        elems.push_back(s.substr(pos, find_pos - pos));
+        pos = find_pos + delim_len;
+    }
+    return elems;
+}
+
 
 #ifdef FOR_MNTAPI
 template <typename Hdl, typename CloseHdl= VixError(*)(Hdl)>

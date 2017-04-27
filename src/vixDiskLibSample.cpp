@@ -2182,12 +2182,11 @@ DoRecordCBT(void)
         int length = std::atoi(extent[1].c_str());
         cout << offset << " " << length << endl;
 
-        buf = new unsigned char[length * VIXDISKLIB_SECTOR_SIZE];
-        int lengthOfBuf = sizeof buf;
+        buf = new uint8[length * VIXDISKLIB_SECTOR_SIZE];
 
         vixError = VixDiskLib_Read(disk.Handle(), offset, length, buf);
         CHECK_AND_THROW(vixError);
-        outfile.write(reinterpret_cast<const char*>(buf), length * VIXDISKLIB_SECTOR_SIZE);
+        outfile.write((char *)&buf[0], length * VIXDISKLIB_SECTOR_SIZE);
 
         delete []buf;
     }
@@ -2199,7 +2198,43 @@ DoRecordCBT(void)
 static void
 DoRecoverCBT(void)
 {
+    VixDisk disk(appGlobals.connection, appGlobals.diskPaths[0].c_str(), appGlobals.openFlags);
+    uint8 *buf;
+    VixError vixError;
 
+    ifstream infile("/root/workspace/backup/changeBlock.txt",ios::in);
+    if(!infile)
+    {
+	    cerr<<"open error!"<<endl;
+        abort( );
+    }
+
+    ifstream datafile("changeBlock.data",ios::in);
+    if(!datafile)
+    {
+	    cerr<<"open error!"<<endl;
+        abort( );
+    }
+
+    string line = "";
+    while(std::getline(infile, line))
+    {
+        vector<string> extent = split(line, " ");
+        int offset = std::atoi(extent[0].c_str());
+        int length = std::atoi(extent[1].c_str());
+        cout << offset << " " << length << endl;
+
+        buf = new uint8[length * VIXDISKLIB_SECTOR_SIZE];
+        datafile.read((char *)buf, length * VIXDISKLIB_SECTOR_SIZE);
+
+        vixError = VixDiskLib_Write(disk.Handle(), offset, length, buf);
+        CHECK_AND_THROW(vixError);
+
+        delete []buf;
+    }
+
+    datafile.close();
+    infile.close();
 }
 
 /*

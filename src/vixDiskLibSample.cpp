@@ -2160,14 +2160,14 @@ DoRecordCBT(void)
     uint8 *buf;
     VixError vixError;
 
-    ifstream infile("/root/workspace/backup/changeBlock.txt",ios::in);
+    ifstream infile("/root/workspace/backup/changeBlockForSystem1.txt",ios::in);
     if(!infile)
     {
 	    cerr<<"open error!"<<endl;
         abort( );
     }
 
-    ofstream outfile("changeBlock.data", ios::binary);
+    ofstream outfile("changeBlockForSystem1.data", ios::binary);
     if(!outfile)
     {
 	    cerr<<"open error!"<<endl;
@@ -2182,13 +2182,26 @@ DoRecordCBT(void)
         int length = std::atoi(extent[1].c_str());
         cout << offset << " " << length << endl;
 
-        buf = new uint8[length * VIXDISKLIB_SECTOR_SIZE];
+        do {
+        	int lengthToBeRead = 0;
+        	if(length > 2048) {
+        		buf = new uint8[2048 * VIXDISKLIB_SECTOR_SIZE];
+        		lengthToBeRead = 2048;
+        		length -= 2048;
+        	} else {
+        		buf = new uint8[length * VIXDISKLIB_SECTOR_SIZE];
+        		lengthToBeRead = length;
+        		length = 0;
+        	}
 
-        vixError = VixDiskLib_Read(disk.Handle(), offset, length, buf);
-        CHECK_AND_THROW(vixError);
-        outfile.write((char *)&buf[0], length * VIXDISKLIB_SECTOR_SIZE);
+        	vixError = VixDiskLib_Read(disk.Handle(), offset, lengthToBeRead, buf);
+            CHECK_AND_THROW(vixError);
+            outfile.write((char *)&buf[0], lengthToBeRead * VIXDISKLIB_SECTOR_SIZE);
 
-        delete []buf;
+        	offset += lengthToBeRead;
+
+        	delete []buf;
+        } while(length > 0);
     }
 
     outfile.close();
@@ -2202,14 +2215,14 @@ DoRecoverCBT(void)
     uint8 *buf;
     VixError vixError;
 
-    ifstream infile("/root/workspace/backup/changeBlock.txt",ios::in);
+    ifstream infile("/root/workspace/backup/changeBlockForData1.txt",ios::in);
     if(!infile)
     {
 	    cerr<<"open error!"<<endl;
         abort( );
     }
 
-    ifstream datafile("changeBlock.data",ios::in);
+    ifstream datafile("changeBlockForData1.data",ios::in);
     if(!datafile)
     {
 	    cerr<<"open error!"<<endl;
@@ -2224,13 +2237,29 @@ DoRecoverCBT(void)
         int length = std::atoi(extent[1].c_str());
         cout << offset << " " << length << endl;
 
-        buf = new uint8[length * VIXDISKLIB_SECTOR_SIZE];
-        datafile.read((char *)buf, length * VIXDISKLIB_SECTOR_SIZE);
+        do {
+        	int lengthToBeWritten = 0;
+        	if(length > 2048) {
+        		buf = new uint8[2048 * VIXDISKLIB_SECTOR_SIZE];
+        		lengthToBeWritten = 2048;
+        		length -= 2048;
+        	} else {
+        		buf = new uint8[length * VIXDISKLIB_SECTOR_SIZE];
+        		lengthToBeWritten = length;
+        		length = 0;
+        	}
 
-        vixError = VixDiskLib_Write(disk.Handle(), offset, length, buf);
-        CHECK_AND_THROW(vixError);
+        	buf = new uint8[lengthToBeWritten * VIXDISKLIB_SECTOR_SIZE];
+        	datafile.read((char *)buf, lengthToBeWritten * VIXDISKLIB_SECTOR_SIZE);
 
-        delete []buf;
+            vixError = VixDiskLib_Write(disk.Handle(), offset, lengthToBeWritten, buf);
+            CHECK_AND_THROW(vixError);
+
+            offset += lengthToBeWritten;
+
+            delete []buf;
+
+        } while (length > 0);
     }
 
     datafile.close();
